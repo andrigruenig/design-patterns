@@ -27,6 +27,10 @@ export class Calculator {
     return rectangle.getWidth() * rectangle.getHeight();
   }
 
+  public static getWidthHeightRatio(rectangle: Rectangular): number {
+    return rectangle.getWidth() / rectangle.getHeight();
+  }
+
   public static getPerimeter(rectangle: Rectangular): number {
     return 2 * rectangle.getWidth() + 2 * rectangle.getHeight();
   }

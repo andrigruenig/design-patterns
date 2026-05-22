@@ -1,68 +1,151 @@
-enum State {
-  CleanUnsaved,
-  CleanSaved,
-  DirtyUnsaved,
-  DirtySaved,
+const textArea = document.getElementById("text") as HTMLTextAreaElement;
+let editor: TextEditor;
+
+interface State {
+  input(): void;
+  saveAs(): void;
+  save(): void;
+  newFile(): void;
 }
 
-const textArea = document.getElementById("text") as HTMLTextAreaElement;
-let state = State.CleanUnsaved;
-let openFile = "";
+class TextEditor {
+  public state: State;
+
+  constructor(public readonly textArea: HTMLTextAreaElement) {
+    this.state = new CleanUnsavedState(this);
+  }
+
+  public setState(state: State) {
+    this.state = state;
+  }
+
+  public setStateLabel(value: string) {
+    const stateLabel = document.getElementById("state-label");
+    if (stateLabel) {
+      stateLabel.innerText = value;
+    }
+  }
+
+  public refreshFiles() {
+    showFiles(listFiles(), "files-list");
+  }
+
+  public saveFile(filename: string) {
+    localStorage.setItem(filename, this.textArea.value);
+    this.refreshFiles();
+  }
+
+  public openFile(filename: string) {
+    this.textArea.value = localStorage.getItem(filename) || "";
+    this.setState(new CleanSavedState(this, filename));
+    this.setStateLabel(filename);
+  }
+
+  public promptForFileName(initialValue: string = "") {
+    let filename = prompt("Enter a File Name", initialValue);
+    if (filename?.trim() == "") {
+      return null;
+    }
+    if (!filename?.endsWith(".txt")) {
+      filename = filename + ".txt";
+    }
+    return filename;
+  }
+
+  public newFile() {
+    this.textArea.value = "";
+    this.setState(new CleanUnsavedState(this));
+    this.setStateLabel("_");
+  }
+}
+
+abstract class BaseState implements State {
+  constructor(protected editor: TextEditor) {}
+
+  public abstract input(): void;
+  public abstract save(): void;
+
+  public saveAs() {
+    const filename = this.editor.promptForFileName();
+    if (filename) {
+      this.editor.saveFile(filename);
+      this.editor.setState(new CleanSavedState(this.editor, filename));
+      this.editor.setStateLabel(filename);
+    }
+  }
+
+  public newFile() {
+    this.editor.newFile();
+  }
+}
+
+class CleanUnsavedState extends BaseState {
+  public input() {
+    this.editor.setState(new DirtyUnsavedState(this.editor));
+    this.editor.setStateLabel("*");
+  }
+
+  public save() {
+    this.saveAs();
+  }
+}
+
+class DirtyUnsavedState extends BaseState {
+  public input() {}
+
+  public save() {
+    this.saveAs();
+  }
+}
+
+class CleanSavedState extends BaseState {
+  constructor(editor: TextEditor, private readonly fileName: string) {
+    super(editor);
+  }
+
+  public input() {
+    this.editor.setState(new DirtySavedState(this.editor, this.fileName));
+    this.editor.setStateLabel(`${this.fileName} *`);
+  }
+
+  public save() {
+    this.editor.saveFile(this.fileName);
+    this.editor.setState(new CleanSavedState(this.editor, this.fileName));
+    this.editor.setStateLabel(this.fileName);
+  }
+}
+
+class DirtySavedState extends BaseState {
+  constructor(editor: TextEditor, private readonly fileName: string) {
+    super(editor);
+  }
+
+  public input() {}
+
+  public save() {
+    this.editor.saveFile(this.fileName);
+    this.editor.setState(new CleanSavedState(this.editor, this.fileName));
+    this.editor.setStateLabel(this.fileName);
+  }
+}
 
 document.addEventListener("DOMContentLoaded", () => {
+  editor = new TextEditor(textArea);
   showFiles(listFiles(), "files-list");
   textArea.addEventListener("input", () => {
-    if (state == State.CleanSaved) {
-      state = State.DirtySaved;
-      setStateLabel(`${openFile} *`);
-    } else if (state == State.CleanUnsaved) {
-      state = State.DirtyUnsaved;
-      setStateLabel("*");
-    }
+    editor.state.input();
   });
   const saveAsButton = document.getElementById("save-as-button");
   saveAsButton?.addEventListener("click", () => {
-    const content = textArea.value;
-    let filename = prompt("Enter a File Name", "");
-    if (filename?.trim() != "") {
-      if (!filename?.endsWith(".txt")) {
-        filename = filename + ".txt";
-      }
-      localStorage.setItem(filename, content);
-      state = State.CleanSaved;
-      openFile = filename;
-      setStateLabel(filename);
-      showFiles(listFiles(), "files-list");
-    }
+    editor.state.saveAs();
   });
   const saveButton = document.getElementById("save-button");
   saveButton?.addEventListener("click", () => {
-    const content = textArea.value;
-    if (state == State.CleanSaved || state == State.DirtySaved) {
-      localStorage.setItem(openFile, content);
-      state = State.CleanSaved;
-      setStateLabel(openFile);
-      showFiles(listFiles(), "files-list");
-    } else {
-      let filename = prompt("Enter a File Name", "");
-      if (filename?.trim() != "") {
-        if (!filename?.endsWith(".txt")) {
-          filename = filename + ".txt";
-        }
-        localStorage.setItem(filename, content);
-        state = State.CleanSaved;
-        openFile = filename;
-        setStateLabel(filename);
-        showFiles(listFiles(), "files-list");
-      }
-    }
+    editor.state.save();
   });
   const newButton = document.getElementById("new-button");
   newButton?.addEventListener("click", () => {
-    state = State.CleanUnsaved;
-    textArea.value = "";
-    openFile = "";
-    setStateLabel("_");
+    editor.state.newFile();
   });
   document.addEventListener("contextmenu", (event) => {
     alert("Wanna steal my source code, huh!?");
@@ -70,13 +153,6 @@ document.addEventListener("DOMContentLoaded", () => {
     return false;
   });
 });
-
-function setStateLabel(value: string) {
-  const stateLabel = document.getElementById("state-label");
-  if (stateLabel) {
-    stateLabel.innerText = value;
-  }
-}
 
 function showFiles(files: string[], parentId: string) {
   const parent = document.getElementById(parentId);
@@ -90,13 +166,7 @@ function showFiles(files: string[], parentId: string) {
     item.appendChild(link);
     parent?.append(item);
     link.addEventListener("click", () => {
-      const content = localStorage.getItem(file);
-      openFile = file;
-      if (textArea != null) {
-        textArea.value = content || "";
-      }
-      state = State.CleanSaved;
-      setStateLabel(file);
+      editor.openFile(file);
     });
   }
 }
